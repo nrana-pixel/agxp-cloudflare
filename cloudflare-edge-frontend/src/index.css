@@ -1,0 +1,142 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* STRICT MONOCHROME PALETTE */
+    --background: 0 0% 100%;
+    --foreground: 0 0% 0%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 0%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 0%;
+
+    --primary: 0 0% 0%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 0%;
+
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 45%;
+
+    --accent: 0 0% 96%;
+    --accent-foreground: 0 0% 0%;
+
+    --destructive: 0 0% 0%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 0 0% 0%;
+
+    --radius: 0px;
+    /* Sharp edges for Nothing.tech feel */
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-none ring-0 focus:ring-0;
+  }
+
+  /* Disable browser default focus rings */
+  *:focus-visible {
+    @apply outline-none ring-offset-0 ring-2 ring-black;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    /* Optional: Subtle dot texture for premium feel */
+    background-image: radial-gradient(#e5e5e5 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+
+  /* Monochrome selection color */
+  ::selection {
+    background-color: #000;
+    color: #fff;
+  }
+
+  /* Monochrome scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #000;
+    border-radius: 0;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #333;
+  }
+}
+
+@layer utilities {
+  .text-display {
+    @apply text-5xl md:text-7xl font-bold tracking-tight text-black uppercase;
+  }
+
+  .text-headline {
+    @apply text-3xl md:text-4xl font-bold tracking-tight text-black uppercase;
+  }
+
+  .text-title {
+    @apply text-xl md:text-2xl font-semibold tracking-tight text-black uppercase;
+  }
+
+  .text-body {
+    @apply text-base leading-relaxed text-neutral-800;
+  }
+
+  .text-caption {
+    @apply text-sm text-neutral-500 font-mono tracking-wide uppercase;
+  }
+
+  /* Custom grainy texture overlay */
+  .grainy {
+    position: relative;
+  }
+
+  .grainy::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
+    opacity: 0.15;
+    pointer-events: none;
+  }
+}
+
+/* Animations */
+@layer utilities {
+  .animate-fade-in {
+    animation: fadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+      filter: blur(4px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+      filter: blur(0);
+    }
+  }
+}

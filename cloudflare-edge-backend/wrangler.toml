@@ -1,0 +1,28 @@
+name = "cloudflare-edge-backend"
+main = "src/index.ts"
+compatibility_date = "2024-02-01"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 Database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "edge_backend_db"
+database_id = "aea1d4fa-9583-43ae-9773-187de8406919"
+
+# KV Namespaces
+[[kv_namespaces]]
+binding = "KV_SESSIONS"
+id = "5eeeb57517e44c0cbfa898a898584a9c"
+
+[[kv_namespaces]]
+binding = "KV_TOKENS"
+id = "1797cb2caab74da7883ed132764371b6"
+
+# Environment Variables
+[vars]
+FRONTEND_URL = "http://localhost:3000"
+API_BASE_URL = "http://localhost:8787"
+
+# Secrets (set via: wrangler secret put <NAME>)
+# - ENCRYPTION_KEY
+# - JWT_SECRET
