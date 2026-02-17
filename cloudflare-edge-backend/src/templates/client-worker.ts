@@ -93,8 +93,12 @@ export default {
 
       // Try to get variant from KV
       // URL-encode the path for KV key
-      const kvKey = encodeURIComponent(path);
-      const variant = await env.VARIANTS.get(kvKey);
+      const encodedKey = encodeURIComponent(path);
+      let variant = await env.VARIANTS.get(encodedKey);
+
+      if (!variant && encodedKey !== path) {
+        variant = await env.VARIANTS.get(path);
+      }
 
       if (variant) {
         // Serve the variant
@@ -201,8 +205,12 @@ export default {
 
     if (isAIBot(userAgent)) {
       const botType = identifyBot(userAgent);
-      const kvKey = encodeURIComponent(path);
-      const variant = await env.VARIANTS.get(kvKey);
+      const encodedKey = encodeURIComponent(path);
+      let variant = await env.VARIANTS.get(encodedKey);
+
+      if (!variant && encodedKey !== path) {
+        variant = await env.VARIANTS.get(path);
+      }
 
       if (variant) {
         const response = new Response(variant, {

@@ -268,9 +268,8 @@ export class DeploymentService {
       try {
         const urlPath = variant.url_path as string;
         const content = variant.content as string;
-        const kvKey = encodeURIComponent(urlPath);
 
-        await cfService.putKVValue(accountId, kvNamespaceId, kvKey, content);
+        await cfService.putKVValue(accountId, kvNamespaceId, urlPath, content);
         count++;
       } catch (error) {
         console.error(`Failed to upload variant ${variant.url_path}:`, error);

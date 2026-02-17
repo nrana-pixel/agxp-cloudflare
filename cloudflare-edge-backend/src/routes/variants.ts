@@ -4,13 +4,21 @@
  */
 
 import { Hono } from 'hono';
-import type { Env, CreateVariantRequest, CreateVariantResponse, UpdateVariantRequest } from '../types';
+import type {
+  Env,
+  CreateVariantRequest,
+  CreateVariantResponse,
+  UpdateVariantRequest,
+  AutoGenerateVariantRequest,
+  AutoGenerateVariantResponse,
+} from '../types';
 import { authMiddleware } from '../middleware/auth.middleware';
 import { standardRateLimit } from '../middleware/ratelimit.middleware';
 import { CloudflareService } from '../services/cloudflare.service';
 import { decryptToken } from '../utils/encryption';
 import { hashContent } from '../utils/hashing';
 import { isValidUrlPath } from '../utils/validation';
+import { ContentGenerationService } from '../services/content-generation.service';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -58,16 +66,32 @@ app.post('/', authMiddleware, standardRateLimit, async (c) => {
     // Generate content hash
     const contentHash = await hashContent(content);
 
-    // Insert variant into DB
-    const result = await c.env.DB.prepare(
-      `INSERT INTO variants 
-       (user_id, deployment_id, url_path, content, content_hash, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'active', datetime('now'), datetime('now'))`
+    // Check for existing variant for same path
+    const existingVariant = await c.env.DB.prepare(
+      `SELECT id FROM variants WHERE user_id = ? AND deployment_id = ? AND url_path = ?`
     )
-      .bind(userId, deploymentId, urlPath, content, contentHash)
-      .run();
+      .bind(userId, deploymentId, urlPath)
+      .first();
 
-    const variantId = result.meta.last_row_id;
+    let variantId: number;
+
+    if (existingVariant?.id) {
+      await c.env.DB.prepare(
+        `UPDATE variants SET content = ?, content_hash = ?, status = 'active', updated_at = datetime('now') WHERE id = ?`
+      )
+        .bind(content, contentHash, existingVariant.id)
+        .run();
+      variantId = existingVariant.id as number;
+    } else {
+      const result = await c.env.DB.prepare(
+        `INSERT INTO variants 
+         (user_id, deployment_id, url_path, content, content_hash, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'active', datetime('now'), datetime('now'))`
+      )
+        .bind(userId, deploymentId, urlPath, content, contentHash)
+        .run();
+      variantId = result.meta.last_row_id as number;
+    }
 
     // Upload to KV
     const accountId = deployment.account_id as string;
@@ -77,8 +101,7 @@ app.post('/', authMiddleware, standardRateLimit, async (c) => {
     const token = await decryptToken(tokenEncrypted, c.env.ENCRYPTION_KEY);
     const cfService = new CloudflareService(token);
 
-    const kvKey = encodeURIComponent(urlPath);
-    await cfService.putKVValue(accountId, kvNamespaceId, kvKey, content);
+    await cfService.putKVValue(accountId, kvNamespaceId, urlPath, content);
 
     return c.json<CreateVariantResponse>({
       success: true,
@@ -146,8 +169,7 @@ app.put('/:id', authMiddleware, async (c) => {
     const token = await decryptToken(tokenEncrypted, c.env.ENCRYPTION_KEY);
     const cfService = new CloudflareService(token);
 
-    const kvKey = encodeURIComponent(urlPath);
-    await cfService.putKVValue(accountId, kvNamespaceId, kvKey, content);
+    await cfService.putKVValue(accountId, kvNamespaceId, urlPath, content);
 
     return c.json({ success: true });
   } catch (error) {
@@ -199,8 +221,7 @@ app.delete('/:id', authMiddleware, async (c) => {
       const token = await decryptToken(tokenEncrypted, c.env.ENCRYPTION_KEY);
       const cfService = new CloudflareService(token);
 
-      const kvKey = encodeURIComponent(urlPath);
-      await cfService.deleteKVValue(accountId, kvNamespaceId, kvKey);
+      await cfService.deleteKVValue(accountId, kvNamespaceId, urlPath);
     } catch (error) {
       console.error('Failed to delete from KV (continuing):', error);
     }
@@ -209,6 +230,110 @@ app.delete('/:id', authMiddleware, async (c) => {
   } catch (error) {
     console.error('Delete variant error:', error);
     return c.json({ error: 'Failed to delete variant' }, 500);
+  }
+});
+
+/**
+ * POST /api/variants/auto-generate
+ * Crawls a URL and optimizes it into a new variant using Gemini
+ */
+app.post('/auto-generate', authMiddleware, standardRateLimit, async (c) => {
+  try {
+    const userId = c.get('userId') as number;
+    const body = await c.req.json<AutoGenerateVariantRequest>();
+    const { deploymentId, urlPath, sourceUrl, instructions } = body;
+
+    if (!deploymentId || !urlPath || !sourceUrl) {
+      return c.json<AutoGenerateVariantResponse>(
+        { success: false, error: 'Missing required fields: deploymentId, urlPath, sourceUrl' },
+        400
+      );
+    }
+
+    if (!isValidUrlPath(urlPath)) {
+      return c.json<AutoGenerateVariantResponse>(
+        { success: false, error: 'Invalid URL path format' },
+        400
+      );
+    }
+
+    // Validate deployment + CF connection
+    const deployment = await c.env.DB.prepare(
+      `SELECT d.*, c.account_id, c.token_encrypted 
+       FROM deployments d 
+       JOIN cloudflare_connections c ON d.user_id = c.user_id 
+       WHERE d.id = ? AND d.user_id = ? AND d.status = ?`
+    )
+      .bind(deploymentId, userId, 'active')
+      .first();
+
+    if (!deployment) {
+      return c.json<AutoGenerateVariantResponse>(
+        { success: false, error: 'Deployment not found' },
+        404
+      );
+    }
+
+    if (!c.env.FIRECRAWL_API_KEY || !c.env.GEMINI_API_KEY) {
+      return c.json<AutoGenerateVariantResponse>(
+        { success: false, error: 'Server missing Firecrawl or Gemini API keys' },
+        500
+      );
+    }
+
+    const generator = new ContentGenerationService(c.env);
+    const { html } = await generator.crawlSourceUrl(sourceUrl);
+    const optimizedHtml = await generator.optimizeContent(html, instructions);
+
+    const contentHash = await hashContent(optimizedHtml);
+
+    // Check for existing variant on same path (unique deployment/path)
+    const existingVariant = await c.env.DB.prepare(
+      `SELECT id FROM variants WHERE user_id = ? AND deployment_id = ? AND url_path = ?`
+    )
+      .bind(userId, deploymentId, urlPath)
+      .first();
+
+    let variantId: number;
+
+    if (existingVariant?.id) {
+      await c.env.DB.prepare(
+        `UPDATE variants SET content = ?, content_hash = ?, status = 'active', updated_at = datetime('now') WHERE id = ?`
+      )
+        .bind(optimizedHtml, contentHash, existingVariant.id)
+        .run();
+      variantId = existingVariant.id as number;
+    } else {
+      const insertResult = await c.env.DB.prepare(
+        `INSERT INTO variants 
+         (user_id, deployment_id, url_path, content, content_hash, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'active', datetime('now'), datetime('now'))`
+      )
+        .bind(userId, deploymentId, urlPath, optimizedHtml, contentHash)
+        .run();
+      variantId = insertResult.meta.last_row_id as number;
+    }
+
+    // Sync KV
+    const accountId = deployment.account_id as string;
+    const kvNamespaceId = deployment.kv_namespace_id as string;
+    const tokenEncrypted = deployment.token_encrypted as string;
+
+    const token = await decryptToken(tokenEncrypted, c.env.ENCRYPTION_KEY);
+    const cfService = new CloudflareService(token);
+    await cfService.putKVValue(accountId, kvNamespaceId, urlPath, optimizedHtml);
+
+    return c.json<AutoGenerateVariantResponse>({
+      success: true,
+      variantId: variantId as number,
+      contentPreview: optimizedHtml.slice(0, 500),
+    });
+  } catch (error) {
+    console.error('Auto-generate variant error:', error);
+    return c.json<AutoGenerateVariantResponse>(
+      { success: false, error: 'Failed to auto-generate variant' },
+      500
+    );
   }
 });
 

@@ -198,8 +198,9 @@ export class CloudflareService {
     key: string,
     value: string
   ): Promise<void> {
+    const encodedKey = encodeURIComponent(key);
     const response = await fetch(
-      `${CLOUDFLARE_API_BASE}/accounts/${accountId}/storage/kv/namespaces/${namespaceId}/values/${key}`,
+      `${CLOUDFLARE_API_BASE}/accounts/${accountId}/storage/kv/namespaces/${namespaceId}/values/${encodedKey}`,
       {
         method: 'PUT',
         headers: {
@@ -224,8 +225,9 @@ export class CloudflareService {
     namespaceId: string,
     key: string
   ): Promise<void> {
+    const encodedKey = encodeURIComponent(key);
     const response = await fetch(
-      `${CLOUDFLARE_API_BASE}/accounts/${accountId}/storage/kv/namespaces/${namespaceId}/values/${key}`,
+      `${CLOUDFLARE_API_BASE}/accounts/${accountId}/storage/kv/namespaces/${namespaceId}/values/${encodedKey}`,
       {
         method: 'DELETE',
         headers: this.getHeaders(),

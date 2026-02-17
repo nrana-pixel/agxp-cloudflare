@@ -14,6 +14,10 @@ export function isValidEmail(email: string): boolean {
  * Validates URL path format
  */
 export function isValidUrlPath(path: string): boolean {
+  if (path === '/') {
+    return true;
+  }
+
   return path.startsWith('/') && path.length > 1;
 }
 

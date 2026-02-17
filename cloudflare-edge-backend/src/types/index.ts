@@ -7,6 +7,8 @@ export interface Env {
   JWT_SECRET: string;
   FRONTEND_URL: string;
   API_BASE_URL: string;
+  FIRECRAWL_API_KEY?: string;
+  GEMINI_API_KEY?: string;
 }
 
 // Client Worker Environment
@@ -127,6 +129,20 @@ export interface CreateVariantRequest {
 export interface CreateVariantResponse {
   success: boolean;
   variantId?: number;
+  error?: string;
+}
+
+export interface AutoGenerateVariantRequest {
+  deploymentId: number;
+  urlPath: string;
+  sourceUrl: string;
+  instructions?: string;
+}
+
+export interface AutoGenerateVariantResponse {
+  success: boolean;
+  variantId?: number;
+  contentPreview?: string;
   error?: string;
 }
 

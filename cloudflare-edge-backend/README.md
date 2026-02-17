@@ -97,12 +97,20 @@ npm run db:migrate
 
 ### 5. Set Secrets
 
-```bash
-# Generate an encryption key (or use your own 256-bit base64 key)
-wrangler secret put ENCRYPTION_KEY
+You can either run the helper script (recommended) or set each secret manually.
 
-# Set JWT secret
+```bash
+# Sync everything from .dev.vars into wrangler secrets
+cd cloudflare-edge-backend
+npm run env:sync
+```
+
+Manual fallback:
+```bash
+wrangler secret put ENCRYPTION_KEY
 wrangler secret put JWT_SECRET
+wrangler secret put FIRECRAWL_API_KEY
+wrangler secret put GEMINI_API_KEY
 ```
 
 ### 6. Update wrangler.toml
@@ -232,6 +240,23 @@ Update a variant and sync to KV.
 #### DELETE /api/variants/:id
 Delete a variant from DB and KV.
 
+#### POST /api/variants/auto-generate
+Crawl a live URL, optimize it with Gemini, and store as a variant.
+
+**Request:**
+```json
+{
+  "deploymentId": 1,
+  "urlPath": "/pricing",
+  "sourceUrl": "https://example.com/pricing",
+  "instructions": "Highlight enterprise features and remove human testimonials"
+}
+```
+
+**Environment requirements:**
+- `FIRECRAWL_API_KEY`
+- `GEMINI_API_KEY` (Gemini 2.5 Flash)
+
 #### GET /api/variants?deploymentId=1
 List all variants for a deployment.
 
@@ -332,7 +357,11 @@ The client worker deployed to user accounts:
 
 ## Environment Variables
 
-See `.env.example` for required environment variables.
+- `.env` → non-secret vars used by both dev server and deployed Worker
+- `.dev.vars` → local-only secrets automatically loaded by `wrangler dev`
+- `npm run env:sync` → pushes secrets to Wrangler before deployment
+
+See `.env.example` for required environment variables and [Environment Management Guide](./docs/ENVIRONMENT_MANAGEMENT.md) for details.
 
 ## 📚 Documentation
 

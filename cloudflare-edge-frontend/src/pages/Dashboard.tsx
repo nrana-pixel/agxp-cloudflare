@@ -7,8 +7,54 @@ import {
     createDeployment,
     getDeployments,
     getAnalytics,
-    createVariant
+    createVariant,
+    autoGenerateVariant
 } from "@/services/api";
+
+const normalizeSourceUrl = (raw: string) => {
+    const trimmed = raw.trim();
+    if (!trimmed) return '';
+
+    let normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    const match = normalized.match(/^(https?:\/\/)(.*)$/i);
+    if (match) {
+        const [, protocol, rest] = match;
+        normalized = rest.toLowerCase().startsWith('www.') ? normalized : `${protocol}www.${rest}`;
+    }
+
+    return normalized;
+};
+
+const normalizeVariantPath = (raw: string) => {
+    let path = raw.trim();
+
+    if (!path) {
+        return '/';
+    }
+
+    // If user pasted a full URL, extract the pathname
+    if (/^https?:\/\//i.test(path)) {
+        try {
+            const url = new URL(path);
+            path = url.pathname + url.search + url.hash;
+        } catch {
+            // Fall through to best-effort cleanup
+            path = path.replace(/^https?:\/\//i, '');
+        }
+    }
+
+    // Remove domain if entered without protocol (e.g., example.com/about)
+    if (!path.startsWith('/') && /[.]/.test(path.split('/')[0])) {
+        const firstSlash = path.indexOf('/');
+        path = firstSlash === -1 ? '' : path.slice(firstSlash);
+    }
+
+    if (!path.startsWith('/')) {
+        path = `/${path}`;
+    }
+
+    return path || '/';
+};
 
 /**
  * Nothing.tech-inspired minimal dashboard
@@ -28,6 +74,11 @@ const Dashboard = () => {
     const [showVariantForm, setShowVariantForm] = useState(false);
     const [variantPath, setVariantPath] = useState('');
     const [variantContent, setVariantContent] = useState('');
+    const [autoMode, setAutoMode] = useState<'manual' | 'auto'>('manual');
+    const [sourceUrl, setSourceUrl] = useState('');
+    const [instructions, setInstructions] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [generatedPreview, setGeneratedPreview] = useState<{ path: string; content: string; variantId?: number } | null>(null);
 
     useEffect(() => {
         // Auto-check connection on load
@@ -107,17 +158,49 @@ const Dashboard = () => {
     };
 
     const handleCreateVariant = async () => {
-        if (!selectedDeployment || !variantPath || !variantContent) return;
+        if (!selectedDeployment || !variantPath) return;
+        const normalizedPath = normalizeVariantPath(variantPath);
+        setVariantPath(normalizedPath);
+        setIsSubmitting(true);
         try {
-            await createVariant(selectedDeployment.id, variantPath, variantContent);
-            setNotification("Variant created");
-            setTimeout(() => setNotification(''), 2000);
-            setShowVariantForm(false);
-            setVariantPath('');
-            setVariantContent('');
+            if (autoMode === 'manual') {
+                if (!variantContent) {
+                    setIsSubmitting(false);
+                    return;
+                }
+                await createVariant(selectedDeployment.id, normalizedPath, variantContent);
+                setNotification("Variant created");
+                setTimeout(() => setNotification(''), 2000);
+                setShowVariantForm(false);
+                setVariantPath('');
+                setVariantContent('');
+                setSourceUrl('');
+                setInstructions('');
+                setGeneratedPreview(null);
+            } else {
+                if (!sourceUrl) {
+                    setIsSubmitting(false);
+                    return;
+                }
+                const normalizedSourceUrl = normalizeSourceUrl(sourceUrl);
+                setSourceUrl(normalizedSourceUrl);
+                const result = await autoGenerateVariant(selectedDeployment.id, normalizedPath, normalizedSourceUrl, instructions || undefined);
+                if (!result.success) {
+                    setNotification(result.error || 'Failed to auto-generate variant');
+                    setTimeout(() => setNotification(''), 2000);
+                    setGeneratedPreview(null);
+                    return;
+                }
+                const previewContent = result.contentPreview || 'Preview unavailable. Check the variant list to view the stored HTML.';
+                setGeneratedPreview({ path: variantPath, content: previewContent, variantId: result.variantId });
+                setNotification("Variant auto-generated");
+                setTimeout(() => setNotification(''), 2000);
+            }
         } catch {
             setNotification("Failed to create variant");
             setTimeout(() => setNotification(''), 2000);
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
@@ -318,6 +401,25 @@ const Dashboard = () => {
 
                                                 {showVariantForm && (
                                                     <div className="space-y-4 mb-6 p-6 bg-black/[0.02] border border-black/10">
+                                                        <div className="flex gap-4">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setAutoMode('manual');
+                                                                    setGeneratedPreview(null);
+                                                                }}
+                                                                className={`flex-1 border px-4 py-2 text-sm font-medium ${autoMode === 'manual' ? 'bg-black text-white' : 'border-black/20'}`}
+                                                            >
+                                                                Manual HTML
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setAutoMode('auto')}
+                                                                className={`flex-1 border px-4 py-2 text-sm font-medium ${autoMode === 'auto' ? 'bg-black text-white' : 'border-black/20'}`}
+                                                            >
+                                                                Auto Generate
+                                                            </button>
+                                                        </div>
                                                         <div>
                                                             <label className="block text-sm font-medium mb-2">URL Path</label>
                                                             <Input
@@ -327,22 +429,107 @@ const Dashboard = () => {
                                                                 className="font-mono text-sm"
                                                             />
                                                         </div>
-                                                        <div>
-                                                            <label className="block text-sm font-medium mb-2">HTML Content</label>
-                                                            <textarea
-                                                                value={variantContent}
-                                                                onChange={(e) => setVariantContent(e.target.value)}
-                                                                placeholder="<html>...</html>"
-                                                                className="w-full px-4 py-3 border border-black/10 bg-white font-mono text-sm min-h-[200px] focus:outline-none focus:ring-2 focus:ring-black"
-                                                            />
-                                                        </div>
+                                                        {autoMode === 'manual' ? (
+                                                            <div>
+                                                                <label className="block text-sm font-medium mb-2">HTML Content</label>
+                                                                <textarea
+                                                                    value={variantContent}
+                                                                    onChange={(e) => setVariantContent(e.target.value)}
+                                                                    placeholder="<html>...</html>"
+                                                                    className="w-full px-4 py-3 border border-black/10 bg-white font-mono text-sm min-h-[200px] focus:outline-none focus:ring-2 focus:ring-black"
+                                                                />
+                                                            </div>
+                                                        ) : (
+                                                            <>
+                                                                <div>
+                                                                    <label className="block text-sm font-medium mb-2">Source URL</label>
+                                                                    <Input
+                                                                        value={sourceUrl}
+                                                                        onChange={(e) => setSourceUrl(e.target.value)}
+                                                                        onBlur={(e) => setSourceUrl(normalizeSourceUrl(e.target.value))}
+                                                                        placeholder="https://example.com/landing"
+                                                                        className="font-mono text-sm"
+                                                                    />
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-sm font-medium mb-2">Optional Instructions</label>
+                                                                    <textarea
+                                                                        value={instructions}
+                                                                        onChange={(e) => setInstructions(e.target.value)}
+                                                                        placeholder="Tone, CTA, layout guidance..."
+                                                                        className="w-full px-4 py-3 border border-black/10 bg-white text-sm min-h-[120px] focus:outline-none focus:ring-2 focus:ring-black"
+                                                                    />
+                                                                </div>
+                                                            </>
+                                                        )}
                                                         <Button
                                                             onClick={handleCreateVariant}
-                                                            disabled={!variantPath || !variantContent}
+                                                            disabled={isSubmitting || !variantPath || (autoMode === 'manual' ? !variantContent : !sourceUrl)}
                                                             className="w-full bg-black text-white hover:bg-black/90"
                                                         >
-                                                            Create Variant
+                                                            {isSubmitting ? 'Submitting...' : autoMode === 'manual' ? 'Create Variant' : 'Auto Generate'}
                                                         </Button>
+                                                    </div>
+                                                )}
+
+                                                {generatedPreview && (
+                                                    <div className="space-y-4 mb-6 p-6 border border-dashed border-black/20 bg-white">
+                                                        <div className="flex items-center justify-between gap-4">
+                                                            <div>
+                                                                <p className="text-sm font-medium">Latest auto-generated preview</p>
+                                                                <p className="text-xs text-muted-foreground font-mono">Path: {generatedPreview.path}</p>
+                                                            </div>
+                                                            <div className="flex gap-2">
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="outline"
+                                                                    size="sm"
+                                                                    className="border-black/20"
+                                                                    onClick={() => setGeneratedPreview(null)}
+                                                                >
+                                                                    Dismiss
+                                                                </Button>
+                                                                <Button
+                                                                    type="button"
+                                                                    size="sm"
+                                                                    className="bg-black text-white hover:bg-black/80"
+                                                                    onClick={async () => {
+                                                                        if (!selectedDeployment || !generatedPreview.path || !generatedPreview.content) return;
+                                                                        setIsSubmitting(true);
+                                                                        try {
+                                                                            await createVariant(selectedDeployment.id, generatedPreview.path, generatedPreview.content);
+                                                                            setNotification('Variant saved to KV');
+                                                                            setTimeout(() => setNotification(''), 2000);
+                                                                            setGeneratedPreview(null);
+                                                                        } catch {
+                                                                            setNotification('Failed to save variant');
+                                                                            setTimeout(() => setNotification(''), 2000);
+                                                                        } finally {
+                                                                            setIsSubmitting(false);
+                                                                        }
+                                                                    }}
+                                                                    disabled={isSubmitting}
+                                                                >
+                                                                    Save to KV
+                                                                </Button>
+                                                            </div>
+                                                        </div>
+                                                        <div className="grid gap-4 md:grid-cols-2">
+                                                            <div>
+                                                                <p className="text-xs font-semibold uppercase text-muted-foreground mb-2">Editable HTML</p>
+                                                                <textarea
+                                                                    value={generatedPreview.content}
+                                                                    onChange={(e) => setGeneratedPreview(prev => prev ? { ...prev, content: e.target.value } : prev)}
+                                                                    className="w-full px-4 py-3 border border-black/10 bg-white font-mono text-xs min-h-[260px]"
+                                                                />
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-xs font-semibold uppercase text-muted-foreground mb-2">Rendered Preview</p>
+                                                                <div className="border border-black/10 bg-white p-4 min-h-[260px] overflow-auto">
+                                                                    <div dangerouslySetInnerHTML={{ __html: generatedPreview.content }} />
+                                                                </div>
+                                                            </div>
+                                                        </div>
                                                     </div>
                                                 )}
                                             </div>

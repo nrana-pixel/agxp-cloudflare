@@ -54,6 +54,30 @@ export async function createVariant(deploymentId: number, urlPath: string, conte
   return res.json();
 }
 
+export interface AutoGenerateVariantResponse {
+  success: boolean;
+  variantId?: number;
+  contentPreview?: string;
+  error?: string;
+}
+
+export async function autoGenerateVariant(
+  deploymentId: number,
+  urlPath: string,
+  sourceUrl: string,
+  instructions?: string
+): Promise<AutoGenerateVariantResponse> {
+  const res = await fetch(`${API_BASE_URL}/api/variants/auto-generate`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${MOCK_JWT}`
+    },
+    body: JSON.stringify({ deploymentId, urlPath, sourceUrl, instructions }),
+  });
+  return res.json();
+}
+
 export async function getAnalytics(deploymentId: number) {
   const res = await fetch(`${API_BASE_URL}/api/analytics/${deploymentId}`, {
     headers: { 'Authorization': `Bearer ${MOCK_JWT}` }
